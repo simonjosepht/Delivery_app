@@ -26,7 +26,7 @@ public class JwtService {
         this.expiration = expiration;
     }
 
-    public String generateToken(String email, String role) {
+    public String generateToken(Long userId, String email, String role) {
 
         Date now = new Date();
 
@@ -36,6 +36,7 @@ public class JwtService {
 
         return Jwts.builder()
                 .subject(email)
+                .claim("userId", userId)
                 .claim("role",role)
                 .issuedAt(now)
                 .expiration(expiryDate)
@@ -60,6 +61,15 @@ public class JwtService {
                 .parseSignedClaims(token)
                 .getPayload()
                 .get("role",String.class);
+    }
+
+    public Long extractUserId(String token) {
+        return Jwts.parser()
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("userId", Long.class);
     }
 
     public boolean isTokenValid(String token) {

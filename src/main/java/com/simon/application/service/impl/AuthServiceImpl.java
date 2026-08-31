@@ -3,6 +3,7 @@ package com.simon.application.service.impl;
 import com.simon.application.dto.request.LoginRequest;
 import com.simon.application.dto.response.LoginResponse;
 import com.simon.application.entity.User;
+import com.simon.application.exception.InvalidCredentialsException;
 import com.simon.application.repository.UserRepository;
 import com.simon.application.security.JwtService;
 import com.simon.application.service.AuthService;
@@ -32,7 +33,7 @@ public class AuthServiceImpl implements AuthService {
 
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() ->
-                        new RuntimeException("Invalid email or password"));
+                        new InvalidCredentialsException("Invalid email or password"));
 
         boolean passwordMatches = passwordEncoder.matches(
                 request.getPassword(),
@@ -40,10 +41,10 @@ public class AuthServiceImpl implements AuthService {
         );
 
         if (!passwordMatches) {
-            throw new RuntimeException("Invalid email or password");
+            throw new InvalidCredentialsException("Invalid email or password");
         }
 
-        String token = jwtService.generateToken(user.getEmail(), user.getRole().name());
+        String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name());
 
         return LoginResponse.builder()
                 .token(token)
