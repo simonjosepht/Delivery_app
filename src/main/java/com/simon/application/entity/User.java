@@ -1,5 +1,6 @@
 package com.simon.application.entity;
 
+import com.simon.application.enums.DriverStatus;
 import com.simon.application.enums.UserRole;
 import jakarta.persistence.*;
 import lombok.*;
@@ -39,6 +40,9 @@ public class User {
 
     @Enumerated(EnumType.STRING)
     private UserRole role;
+
+    @Enumerated(EnumType.STRING)
+    private DriverStatus driverStatus;
 
     @CreationTimestamp
     @Column(nullable = false)

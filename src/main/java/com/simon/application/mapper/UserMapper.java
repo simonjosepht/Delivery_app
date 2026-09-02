@@ -30,6 +30,7 @@ public class UserMapper {
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .role(user.getRole())
+                .driverStatus(user.getDriverStatus())
                 .createdAt(user.getCreatedAt())
                 .build();
     }

@@ -7,6 +7,7 @@ import com.simon.application.entity.Delivery;
 import com.simon.application.entity.Order;
 import com.simon.application.entity.User;
 import com.simon.application.enums.DeliveryStatus;
+import com.simon.application.enums.DriverStatus;
 import com.simon.application.enums.UserRole;
 import com.simon.application.exception.InvalidDeliveryOperationException;
 import com.simon.application.exception.ResourceNotFoundException;
@@ -83,6 +84,13 @@ public class DeliveryServiceImpl implements DeliveryService {
             throw new InvalidDeliveryOperationException("Assigned user must have the DRIVER role");
         }
 
+        if (driver.getDriverStatus() != DriverStatus.AVAILABLE) {
+            throw new InvalidDeliveryOperationException("Driver is not available for a new delivery");
+        }
+
+        driver.setDriverStatus(DriverStatus.ON_DELIVERY);
+        userRepository.save(driver);
+
         delivery.setDriver(driver);
         delivery.setStatus(DeliveryStatus.ASSIGNED);
 
@@ -117,6 +125,8 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         delivery.setStatus(status);
 
+        releaseDriverIfDelivered(delivery);
+
         return DeliveryMapper.toResponse(deliveryRepository.save(delivery));
     }
 
@@ -133,6 +143,8 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         delivery.setStatus(status);
 
+        releaseDriverIfDelivered(delivery);
+
         return DeliveryMapper.toResponse(deliveryRepository.save(delivery));
     }
 
@@ -140,6 +152,14 @@ public class DeliveryServiceImpl implements DeliveryService {
         if (!ALLOWED_TRANSITIONS.get(currentStatus).contains(targetStatus)) {
             throw new InvalidDeliveryOperationException(
                     "Cannot transition delivery from " + currentStatus + " to " + targetStatus);
+        }
+    }
+
+    private void releaseDriverIfDelivered(Delivery delivery) {
+        if (delivery.getStatus() == DeliveryStatus.DELIVERED && delivery.getDriver() != null) {
+            User driver = delivery.getDriver();
+            driver.setDriverStatus(DriverStatus.AVAILABLE);
+            userRepository.save(driver);
         }
     }
 

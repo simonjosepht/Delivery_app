@@ -4,6 +4,7 @@ import com.simon.application.dto.request.CreateUserRequest;
 import com.simon.application.dto.request.UpdateUserRequest;
 import com.simon.application.dto.response.UserResponse;
 import com.simon.application.entity.User;
+import com.simon.application.enums.DriverStatus;
 import com.simon.application.enums.UserRole;
 import com.simon.application.exception.ResourceNotFoundException;
 import com.simon.application.exception.UnauthorizedRoleAssignmentException;
@@ -56,6 +57,10 @@ public class UserServiceImpl implements UserService {
 
         User user = UserMapper.toEntity(request);
         user.setPassword(passwordEncoder.encode(user.getPassword()));
+
+        if (user.getRole() == UserRole.DRIVER) {
+            user.setDriverStatus(DriverStatus.AVAILABLE);
+        }
 
         User savedUser = userRepository.save(user);
 

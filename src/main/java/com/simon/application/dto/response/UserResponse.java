@@ -1,5 +1,6 @@
 package com.simon.application.dto.response;
 
+import com.simon.application.enums.DriverStatus;
 import com.simon.application.enums.UserRole;
 import lombok.Builder;
 import lombok.Data;
@@ -21,6 +22,8 @@ public class UserResponse {
     private String phoneNumber;
 
     private UserRole role;
+
+    private DriverStatus driverStatus;
 
     private LocalDateTime createdAt;
 }
