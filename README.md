@@ -566,9 +566,12 @@ email
 phoneNumber
 password
 role
+driverStatus
 createdAt
 updatedAt
 ```
+
+`driverStatus` (`AVAILABLE` / `UNAVAILABLE` / `ON_DELIVERY`) is only populated for users with `role = DRIVER`; it is `null` for `CUSTOMER` and `ADMIN`.
 
 Database table:
 
@@ -587,6 +590,7 @@ users
 ├── phone_number
 ├── password
 ├── role
+├── driver_status
 ├── created_at
 └── updated_at
 ```
@@ -1197,47 +1201,48 @@ The final architecture is intended to evolve toward:
 
 ## Phase 4 — Authorization
 
-* [ ] CUSTOMER authorization
-* [ ] DRIVER authorization
+* [x] CUSTOMER authorization
+* [x] DRIVER authorization
 * [x] ADMIN authorization
 * [x] Role-based endpoint protection
 * [x] Method-level authorization where required
 
-> CUSTOMER and DRIVER authorization are pending because there are no Order/Delivery endpoints yet for those roles to be authorized against. The mechanism (`@PreAuthorize`, ownership checks) is already in place and will be reused directly in Phase 5/6.
+> CUSTOMER and DRIVER authorization are exercised directly by the Order/Delivery/Driver endpoints added in Phases 5–7, using the `@PreAuthorize` / ownership-check mechanism established here.
 
 ## Phase 5 — Order Management
 
-* [ ] Order entity
-* [ ] Order repository
-* [ ] Order service
-* [ ] Order controller
-* [ ] Order lifecycle
-* [ ] Customer order APIs
+* [x] Order entity
+* [x] Order repository
+* [x] Order service
+* [x] Order controller
+* [x] Order lifecycle
+* [x] Customer order APIs
 
 ## Phase 6 — Delivery Management
 
-* [ ] Delivery entity
-* [ ] Delivery repository
-* [ ] Delivery service
-* [ ] Delivery controller
-* [ ] Driver assignment
-* [ ] Delivery lifecycle
+* [x] Delivery entity
+* [x] Delivery repository
+* [x] Delivery service
+* [x] Delivery controller
+* [x] Driver assignment
+* [x] Delivery lifecycle
 
 ## Phase 7 — Driver Management
 
-* [ ] Driver entity
-* [ ] Driver service
-* [ ] Driver availability
-* [ ] Driver assignment
-* [ ] Driver status
+* [x] Driver status (`DriverStatus`: AVAILABLE / UNAVAILABLE / ON_DELIVERY, tracked on `User`)
+* [x] Driver service (list drivers, list available drivers, update own status)
+* [x] Driver availability (self-service `AVAILABLE` ⇄ `UNAVAILABLE` toggle)
+* [x] Driver assignment (delivery assignment checks + flips availability automatically)
+
+> There is no separate `Driver` entity — a driver is a `User` with `role = DRIVER` plus a `driverStatus`. `ON_DELIVERY` is system-managed only: set on delivery assignment, released back to `AVAILABLE` on `DELIVERED`. Known gap: driver accounts can currently be created through public self-registration with no vetting — see Phase 11 or revisit before production.
 
 ## Phase 8 — Redis
 
-* [ ] Redis configuration
-* [ ] Cache frequently accessed data
-* [ ] Cache invalidation
-* [ ] Cache TTL
-* [ ] Cache testing
+* [x] Redis configuration (`RedisConfig`: `@EnableCaching` + `RedisCacheManagerBuilderCustomizer`, JSON serialization)
+* [x] Cache frequently accessed data (`orders` by id, `deliveries` by id, `availableDrivers` list)
+* [x] Cache invalidation (`@CachePut` on order/delivery writes; explicit `CacheManager` eviction of `availableDrivers` on the two transitions that change driver availability)
+* [x] Cache TTL (`orders` 5 min, `deliveries` 2 min, `availableDrivers` 30 sec)
+* [ ] Cache testing — **not yet verified at runtime.** This sandbox has no Docker daemon reachable (`docker ps` fails), and the app needs a live Postgres to boot, so cache hits/misses/evictions haven't been confirmed against a real Redis instance yet. Code compiles clean (`mvn -o compile`), but that only proves it builds, not that it behaves correctly against actual Redis.
 
 ## Phase 9 — Kafka
 
@@ -1282,11 +1287,11 @@ User Management            █████████████████�
 Validation                 ████████████████████ 100%
 Exception Handling         ████████████████████ 100%
 Authentication             ████████████████████ 100%
-Authorization              ████████████░░░░░░░░  60%
-Orders                     ░░░░░░░░░░░░░░░░░░░░   0%
-Deliveries                 ░░░░░░░░░░░░░░░░░░░░   0%
-Drivers                    ░░░░░░░░░░░░░░░░░░░░   0%
-Redis Caching              ░░░░░░░░░░░░░░░░░░░░   0%
+Authorization              ████████████████████ 100%
+Orders                     ████████████████████ 100%
+Deliveries                 ████████████████████ 100%
+Drivers                    ████████████████████ 100%
+Redis Caching              ████████████████░░░░  80% (implemented, not runtime-verified)
 Kafka Events               ░░░░░░░░░░░░░░░░░░░░   0%
 Microservices              ░░░░░░░░░░░░░░░░░░░░   0%
 Testing                    ░░░░░░░░░░░░░░░░░░░░   0%
@@ -1355,31 +1360,11 @@ This allows each architectural concept to be understood and tested before introd
 
 # 📌 Immediate Next Step
 
-The immediate task is to complete the authentication verification by ensuring the `PasswordEncoder` bean is configured correctly.
+Authentication, authorization, the Order / Delivery / Driver domain (Phases 1–7), and Redis caching (Phase 8) are implemented in code.
 
-Then verify:
+**Outstanding before Phase 8 is truly done:** manual runtime verification against a real Redis instance (start `docker compose up -d`, run the app, use `redis-cli` to confirm `orders::<id>`, `deliveries::<id>`, and `availableDrivers::*` keys appear, expire on their configured TTL, and get evicted/updated on the expected writes).
 
-```text
-Registration
-    ↓
-BCrypt password storage
-    ↓
-Login
-    ↓
-JWT generation
-    ↓
-Protected endpoint
-    ↓
-JWT validation
-```
-
-After authentication is fully verified, the next major feature is:
-
-```text
-ROLE-BASED AUTHORIZATION
-```
-
-followed by the **Order Management module**.
+After that, the next major feature is **Phase 9 — Kafka Events**.
 
 ---
 

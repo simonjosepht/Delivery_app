@@ -11,6 +11,8 @@ import com.simon.application.mapper.OrderMapper;
 import com.simon.application.repository.OrderRepository;
 import com.simon.application.repository.UserRepository;
 import com.simon.application.service.OrderService;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +57,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @Cacheable(cacheNames = "orders", key = "#id")
     public OrderResponse getOrder(Long id) {
         return OrderMapper.toResponse(findOrderEntityById(id));
     }
@@ -74,6 +77,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @CachePut(cacheNames = "orders", key = "#id")
     public OrderResponse updateOrderStatus(Long id, OrderStatus status) {
 
         Order order = findOrderEntityById(id);
@@ -86,6 +90,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @CachePut(cacheNames = "orders", key = "#id")
     public OrderResponse cancelOrder(Long id, Long customerId) {
 
         Order order = findOrderEntityById(id);

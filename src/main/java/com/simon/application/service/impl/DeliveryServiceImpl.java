@@ -16,6 +16,10 @@ import com.simon.application.repository.DeliveryRepository;
 import com.simon.application.repository.OrderRepository;
 import com.simon.application.repository.UserRepository;
 import com.simon.application.service.DeliveryService;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
@@ -41,13 +45,16 @@ public class DeliveryServiceImpl implements DeliveryService {
     private final DeliveryRepository deliveryRepository;
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
+    private final CacheManager cacheManager;
 
     public DeliveryServiceImpl(DeliveryRepository deliveryRepository,
                                 OrderRepository orderRepository,
-                                UserRepository userRepository) {
+                                UserRepository userRepository,
+                                CacheManager cacheManager) {
         this.deliveryRepository = deliveryRepository;
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
+        this.cacheManager = cacheManager;
     }
 
     @Override
@@ -68,6 +75,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     }
 
     @Override
+    @CachePut(cacheNames = "deliveries", key = "#deliveryId")
     public DeliveryResponse assignDriver(Long deliveryId, AssignDriverRequest request) {
 
         Delivery delivery = findDeliveryEntityById(deliveryId);
@@ -90,6 +98,7 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         driver.setDriverStatus(DriverStatus.ON_DELIVERY);
         userRepository.save(driver);
+        evictAvailableDrivers();
 
         delivery.setDriver(driver);
         delivery.setStatus(DeliveryStatus.ASSIGNED);
@@ -98,6 +107,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     }
 
     @Override
+    @Cacheable(cacheNames = "deliveries", key = "#id")
     public DeliveryResponse getDelivery(Long id) {
         return DeliveryMapper.toResponse(findDeliveryEntityById(id));
     }
@@ -117,6 +127,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     }
 
     @Override
+    @CachePut(cacheNames = "deliveries", key = "#id")
     public DeliveryResponse updateDeliveryStatus(Long id, DeliveryStatus status) {
 
         Delivery delivery = findDeliveryEntityById(id);
@@ -131,6 +142,7 @@ public class DeliveryServiceImpl implements DeliveryService {
     }
 
     @Override
+    @CachePut(cacheNames = "deliveries", key = "#id")
     public DeliveryResponse updateDeliveryStatusAsDriver(Long id, DeliveryStatus status, Long driverId) {
 
         Delivery delivery = findDeliveryEntityById(id);
@@ -160,6 +172,14 @@ public class DeliveryServiceImpl implements DeliveryService {
             User driver = delivery.getDriver();
             driver.setDriverStatus(DriverStatus.AVAILABLE);
             userRepository.save(driver);
+            evictAvailableDrivers();
+        }
+    }
+
+    private void evictAvailableDrivers() {
+        Cache cache = cacheManager.getCache("availableDrivers");
+        if (cache != null) {
+            cache.clear();
         }
     }
 

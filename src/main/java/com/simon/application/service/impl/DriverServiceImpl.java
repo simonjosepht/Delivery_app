@@ -9,6 +9,9 @@ import com.simon.application.exception.ResourceNotFoundException;
 import com.simon.application.mapper.UserMapper;
 import com.simon.application.repository.UserRepository;
 import com.simon.application.service.DriverService;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -17,9 +20,11 @@ import java.util.List;
 public class DriverServiceImpl implements DriverService {
 
     private final UserRepository userRepository;
+    private final CacheManager cacheManager;
 
-    public DriverServiceImpl(UserRepository userRepository) {
+    public DriverServiceImpl(UserRepository userRepository, CacheManager cacheManager) {
         this.userRepository = userRepository;
+        this.cacheManager = cacheManager;
     }
 
     @Override
@@ -30,6 +35,7 @@ public class DriverServiceImpl implements DriverService {
     }
 
     @Override
+    @Cacheable(cacheNames = "availableDrivers")
     public List<UserResponse> getAvailableDrivers() {
         return userRepository.findByRoleAndDriverStatus(UserRole.DRIVER, DriverStatus.AVAILABLE).stream()
                 .map(UserMapper::toResponse)
@@ -56,6 +62,16 @@ public class DriverServiceImpl implements DriverService {
 
         driver.setDriverStatus(status);
 
-        return UserMapper.toResponse(userRepository.save(driver));
+        UserResponse response = UserMapper.toResponse(userRepository.save(driver));
+        evictAvailableDrivers();
+
+        return response;
+    }
+
+    private void evictAvailableDrivers() {
+        Cache cache = cacheManager.getCache("availableDrivers");
+        if (cache != null) {
+            cache.clear();
+        }
     }
 }
