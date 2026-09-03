@@ -1,8 +1,8 @@
 package com.simon.application.service;
 
 import com.simon.application.dto.request.CreateUserRequest;
+import com.simon.application.dto.request.UpdateUserRequest;
 import com.simon.application.dto.response.UserResponse;
-import com.simon.application.entity.User;
 
 import java.util.List;
 
@@ -10,11 +10,13 @@ public interface UserService {
 
     UserResponse createUser(CreateUserRequest request);
 
-    User getUser(Long id);
+    UserResponse createUserByAdmin(CreateUserRequest request);
 
-    List<User> getAllUsers();
+    UserResponse getUser(Long id);
 
-    User updateUser(Long id, User user);
+    List<UserResponse> getAllUsers();
+
+    UserResponse updateUser(Long id, UpdateUserRequest request);
 
     void deleteUser(Long id);
 }

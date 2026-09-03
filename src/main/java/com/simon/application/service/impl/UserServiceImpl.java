@@ -1,13 +1,16 @@
 package com.simon.application.service.impl;
 
 import com.simon.application.dto.request.CreateUserRequest;
+import com.simon.application.dto.request.UpdateUserRequest;
 import com.simon.application.dto.response.UserResponse;
 import com.simon.application.entity.User;
+import com.simon.application.enums.UserRole;
+import com.simon.application.exception.ResourceNotFoundException;
+import com.simon.application.exception.UnauthorizedRoleAssignmentException;
 import com.simon.application.exception.UserAlreadyExistsException;
 import com.simon.application.mapper.UserMapper;
 import com.simon.application.repository.UserRepository;
 import com.simon.application.service.UserService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +31,21 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserResponse createUser(CreateUserRequest request) {
 
+        if (request.getRole() != UserRole.CUSTOMER && request.getRole() != UserRole.DRIVER) {
+            throw new UnauthorizedRoleAssignmentException(
+                    "Self-registration is only allowed for CUSTOMER or DRIVER roles");
+        }
+
+        return createUserInternal(request);
+    }
+
+    @Override
+    public UserResponse createUserByAdmin(CreateUserRequest request) {
+        return createUserInternal(request);
+    }
+
+    private UserResponse createUserInternal(CreateUserRequest request) {
+
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new UserAlreadyExistsException("Email already exists");
         }
@@ -45,33 +63,39 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public User getUser(Long id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+    public UserResponse getUser(Long id) {
+        return UserMapper.toResponse(findUserEntityById(id));
     }
 
     @Override
-    public List<User> getAllUsers() {
-        return userRepository.findAll();
+    public List<UserResponse> getAllUsers() {
+        return userRepository.findAll().stream()
+                .map(UserMapper::toResponse)
+                .toList();
     }
 
     @Override
-    public User updateUser(Long id, User user) {
+    public UserResponse updateUser(Long id, UpdateUserRequest request) {
 
-        User existingUser = getUser(id);
+        User existingUser = findUserEntityById(id);
 
-        existingUser.setFirstName(user.getFirstName());
-        existingUser.setLastName(user.getLastName());
-        existingUser.setPhoneNumber(user.getPhoneNumber());
+        existingUser.setFirstName(request.getFirstName());
+        existingUser.setLastName(request.getLastName());
+        existingUser.setPhoneNumber(request.getPhoneNumber());
 
-        return userRepository.save(existingUser);
+        return UserMapper.toResponse(userRepository.save(existingUser));
     }
 
     @Override
     public void deleteUser(Long id) {
 
-        User user = getUser(id);
+        User user = findUserEntityById(id);
 
         userRepository.delete(user);
+    }
+
+    private User findUserEntityById(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
     }
 }

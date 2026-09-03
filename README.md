@@ -1199,9 +1199,11 @@ The final architecture is intended to evolve toward:
 
 * [ ] CUSTOMER authorization
 * [ ] DRIVER authorization
-* [ ] ADMIN authorization
-* [ ] Role-based endpoint protection
-* [ ] Method-level authorization where required
+* [x] ADMIN authorization
+* [x] Role-based endpoint protection
+* [x] Method-level authorization where required
+
+> CUSTOMER and DRIVER authorization are pending because there are no Order/Delivery endpoints yet for those roles to be authorized against. The mechanism (`@PreAuthorize`, ownership checks) is already in place and will be reused directly in Phase 5/6.
 
 ## Phase 5 — Order Management
 
@@ -1280,7 +1282,7 @@ User Management            █████████████████�
 Validation                 ████████████████████ 100%
 Exception Handling         ████████████████████ 100%
 Authentication             ████████████████████ 100%
-Authorization              ███████░░░░░░░░░░░░  35%
+Authorization              ████████████░░░░░░░░  60%
 Orders                     ░░░░░░░░░░░░░░░░░░░░   0%
 Deliveries                 ░░░░░░░░░░░░░░░░░░░░   0%
 Drivers                    ░░░░░░░░░░░░░░░░░░░░   0%
