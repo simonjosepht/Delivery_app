@@ -1242,16 +1242,20 @@ The final architecture is intended to evolve toward:
 * [x] Cache frequently accessed data (`orders` by id, `deliveries` by id, `availableDrivers` list)
 * [x] Cache invalidation (`@CachePut` on order/delivery writes; explicit `CacheManager` eviction of `availableDrivers` on the two transitions that change driver availability)
 * [x] Cache TTL (`orders` 5 min, `deliveries` 2 min, `availableDrivers` 30 sec)
-* [ ] Cache testing — **not yet verified at runtime.** This sandbox has no Docker daemon reachable (`docker ps` fails), and the app needs a live Postgres to boot, so cache hits/misses/evictions haven't been confirmed against a real Redis instance yet. Code compiles clean (`mvn -o compile`), but that only proves it builds, not that it behaves correctly against actual Redis.
+* [x] Cache testing — verified manually against a live Redis instance (2026-09-03): `orders::<id>` and `deliveries::<id>` keys appear on first read, subsequent reads skip the SQL query, `@CachePut` updates the cached value in place on writes, and `availableDrivers::*` is evicted immediately on driver assignment rather than waiting out its TTL.
+
+> **Bug found during that verification (fixed 2026-09-03):** `OrderResponse`, `DeliveryResponse`, and `UserResponse` were annotated only `@Data @Builder` with no explicit constructors. Lombok's rule is that `@Builder` generates its own package-private all-args constructor when no constructor is explicitly declared, and that suppresses `@Data`'s usual no-args constructor. Result: these classes had **only** an all-args constructor, so Jackson could serialize them into Redis fine (via getters) but couldn't deserialize the cached JSON back out on a cache **hit** (`InvalidDefinitionException: no Creators, like default constructor, exist`) — invisible on a cache miss, and invisible at compile time, only surfacing when the cached path was actually exercised. Fixed by adding explicit `@NoArgsConstructor @AllArgsConstructor` to all three, plus `OrderEvent`/`DeliveryEvent` (same gap, would have broken Kafka consumption the same way) and, preventively, `LoginResponse`/`ErrorResponse` (not currently round-tripped through JSON anywhere, but same latent gap). **Redis re-verification of the cache-hit path is recommended** to confirm the fix.
 
 ## Phase 9 — Kafka
 
-* [ ] Kafka producers
-* [ ] Kafka consumers
-* [ ] Order events
-* [ ] Delivery events
-* [ ] Notification events
-* [ ] Event-driven communication
+* [x] Kafka producers (`EventPublisher`, using `KafkaTemplate<String, Object>` with JSON serialization, keyed by order/delivery id so per-entity ordering is preserved)
+* [x] Kafka consumers (`NotificationListener`, `@KafkaListener` on both topics — logs the event as a stand-in for a real notification system)
+* [x] Order events (`ORDER_CREATED`, `ORDER_CONFIRMED`, `ORDER_CANCELLED` — published from `OrderServiceImpl` on the matching transitions)
+* [x] Delivery events (`DELIVERY_ASSIGNED`, `DELIVERY_PICKED_UP`, `DELIVERY_OUT_FOR_DELIVERY`, `DELIVERY_COMPLETED` — published from `DeliveryServiceImpl`)
+* [x] Notification events (consumed by `NotificationListener`; a real Notification Service is future work, not built yet)
+* [ ] Event-driven communication — **not yet verified at runtime.** Topics (`order-events`, `delivery-events`, 3 partitions each) are declared via `KafkaTopicConfig` `NewTopic` beans, but this hasn't been confirmed against a live Kafka broker (no Docker daemon in this sandbox).
+
+> `OrderStatus`/`DeliveryStatus` transitions to `ASSIGNED`/`OUT_FOR_DELIVERY`/`DELIVERED` on the **Order** entity intentionally do **not** publish their own events — those transitions are already represented by the corresponding **Delivery**-side events, so publishing both would be a duplicate signal for the same real-world change.
 
 ## Phase 10 — Microservices
 
@@ -1291,8 +1295,8 @@ Authorization              █████████████████�
 Orders                     ████████████████████ 100%
 Deliveries                 ████████████████████ 100%
 Drivers                    ████████████████████ 100%
-Redis Caching              ████████████████░░░░  80% (implemented, not runtime-verified)
-Kafka Events               ░░░░░░░░░░░░░░░░░░░░   0%
+Redis Caching              ████████████████████ 100%
+Kafka Events               ████████████████░░░░  80% (implemented, not runtime-verified)
 Microservices              ░░░░░░░░░░░░░░░░░░░░   0%
 Testing                    ░░░░░░░░░░░░░░░░░░░░   0%
 Deployment                 ░░░░░░░░░░░░░░░░░░░░   0%
@@ -1360,11 +1364,13 @@ This allows each architectural concept to be understood and tested before introd
 
 # 📌 Immediate Next Step
 
-Authentication, authorization, the Order / Delivery / Driver domain (Phases 1–7), and Redis caching (Phase 8) are implemented in code.
+Phases 1–8 are complete and verified: authentication, authorization, the Order / Delivery / Driver domain, and Redis caching (confirmed against a live Redis instance on 2026-09-03).
 
-**Outstanding before Phase 8 is truly done:** manual runtime verification against a real Redis instance (start `docker compose up -d`, run the app, use `redis-cli` to confirm `orders::<id>`, `deliveries::<id>`, and `availableDrivers::*` keys appear, expire on their configured TTL, and get evicted/updated on the expected writes).
+Phase 9 (Kafka events) is implemented in code — `EventPublisher` publishes on the Order/Delivery lifecycle transitions, `NotificationListener` consumes and logs both topics.
 
-After that, the next major feature is **Phase 9 — Kafka Events**.
+**Outstanding before Phase 9 is truly done:** manual runtime verification against a live Kafka broker (start `docker compose up -d`, run the app, hit the order/delivery endpoints, and confirm in the app logs that `NotificationListener` actually received each published event — the same kind of check we just did for Redis in Phase 8).
+
+After that, the next major feature is **Phase 10 — Microservices**.
 
 ---
 

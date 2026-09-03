@@ -9,6 +9,9 @@ import com.simon.application.entity.User;
 import com.simon.application.enums.DeliveryStatus;
 import com.simon.application.enums.DriverStatus;
 import com.simon.application.enums.UserRole;
+import com.simon.application.event.DeliveryEvent;
+import com.simon.application.event.EventPublisher;
+import com.simon.application.event.EventType;
 import com.simon.application.exception.InvalidDeliveryOperationException;
 import com.simon.application.exception.ResourceNotFoundException;
 import com.simon.application.mapper.DeliveryMapper;
@@ -23,6 +26,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -46,15 +50,18 @@ public class DeliveryServiceImpl implements DeliveryService {
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final CacheManager cacheManager;
+    private final EventPublisher eventPublisher;
 
     public DeliveryServiceImpl(DeliveryRepository deliveryRepository,
                                 OrderRepository orderRepository,
                                 UserRepository userRepository,
-                                CacheManager cacheManager) {
+                                CacheManager cacheManager,
+                                EventPublisher eventPublisher) {
         this.deliveryRepository = deliveryRepository;
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
         this.cacheManager = cacheManager;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -103,7 +110,11 @@ public class DeliveryServiceImpl implements DeliveryService {
         delivery.setDriver(driver);
         delivery.setStatus(DeliveryStatus.ASSIGNED);
 
-        return DeliveryMapper.toResponse(deliveryRepository.save(delivery));
+        Delivery savedDelivery = deliveryRepository.save(delivery);
+
+        publishDeliveryStatusEvent(savedDelivery);
+
+        return DeliveryMapper.toResponse(savedDelivery);
     }
 
     @Override
@@ -138,7 +149,11 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         releaseDriverIfDelivered(delivery);
 
-        return DeliveryMapper.toResponse(deliveryRepository.save(delivery));
+        Delivery savedDelivery = deliveryRepository.save(delivery);
+
+        publishDeliveryStatusEvent(savedDelivery);
+
+        return DeliveryMapper.toResponse(savedDelivery);
     }
 
     @Override
@@ -157,7 +172,11 @@ public class DeliveryServiceImpl implements DeliveryService {
 
         releaseDriverIfDelivered(delivery);
 
-        return DeliveryMapper.toResponse(deliveryRepository.save(delivery));
+        Delivery savedDelivery = deliveryRepository.save(delivery);
+
+        publishDeliveryStatusEvent(savedDelivery);
+
+        return DeliveryMapper.toResponse(savedDelivery);
     }
 
     private void validateTransition(DeliveryStatus currentStatus, DeliveryStatus targetStatus) {
@@ -181,6 +200,30 @@ public class DeliveryServiceImpl implements DeliveryService {
         if (cache != null) {
             cache.clear();
         }
+    }
+
+    private void publishDeliveryStatusEvent(Delivery delivery) {
+
+        EventType eventType = switch (delivery.getStatus()) {
+            case ASSIGNED -> EventType.DELIVERY_ASSIGNED;
+            case PICKED_UP -> EventType.DELIVERY_PICKED_UP;
+            case OUT_FOR_DELIVERY -> EventType.DELIVERY_OUT_FOR_DELIVERY;
+            case DELIVERED -> EventType.DELIVERY_COMPLETED;
+            default -> null;
+        };
+
+        if (eventType == null) {
+            return;
+        }
+
+        eventPublisher.publishDeliveryEvent(DeliveryEvent.builder()
+                .eventType(eventType)
+                .deliveryId(delivery.getId())
+                .orderId(delivery.getOrder().getId())
+                .driverId(delivery.getDriver() != null ? delivery.getDriver().getId() : null)
+                .status(delivery.getStatus())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     private Delivery findDeliveryEntityById(Long id) {

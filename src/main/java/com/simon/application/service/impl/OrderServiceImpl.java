@@ -5,6 +5,9 @@ import com.simon.application.dto.response.OrderResponse;
 import com.simon.application.entity.Order;
 import com.simon.application.entity.User;
 import com.simon.application.enums.OrderStatus;
+import com.simon.application.event.EventPublisher;
+import com.simon.application.event.EventType;
+import com.simon.application.event.OrderEvent;
 import com.simon.application.exception.InvalidOrderStatusException;
 import com.simon.application.exception.ResourceNotFoundException;
 import com.simon.application.mapper.OrderMapper;
@@ -16,6 +19,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -38,10 +42,12 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
+    private final EventPublisher eventPublisher;
 
-    public OrderServiceImpl(OrderRepository orderRepository, UserRepository userRepository) {
+    public OrderServiceImpl(OrderRepository orderRepository, UserRepository userRepository, EventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -53,7 +59,17 @@ public class OrderServiceImpl implements OrderService {
         Order order = OrderMapper.toEntity(request, customer);
         order.setStatus(OrderStatus.CREATED);
 
-        return OrderMapper.toResponse(orderRepository.save(order));
+        Order savedOrder = orderRepository.save(order);
+
+        eventPublisher.publishOrderEvent(OrderEvent.builder()
+                .eventType(EventType.ORDER_CREATED)
+                .orderId(savedOrder.getId())
+                .customerId(customerId)
+                .status(savedOrder.getStatus())
+                .occurredAt(LocalDateTime.now())
+                .build());
+
+        return OrderMapper.toResponse(savedOrder);
     }
 
     @Override
@@ -86,7 +102,11 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(status);
 
-        return OrderMapper.toResponse(orderRepository.save(order));
+        Order savedOrder = orderRepository.save(order);
+
+        publishOrderStatusEvent(savedOrder);
+
+        return OrderMapper.toResponse(savedOrder);
     }
 
     @Override
@@ -103,7 +123,11 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
 
-        return OrderMapper.toResponse(orderRepository.save(order));
+        Order savedOrder = orderRepository.save(order);
+
+        publishOrderStatusEvent(savedOrder);
+
+        return OrderMapper.toResponse(savedOrder);
     }
 
     private void validateTransition(OrderStatus currentStatus, OrderStatus targetStatus) {
@@ -111,6 +135,27 @@ public class OrderServiceImpl implements OrderService {
             throw new InvalidOrderStatusException(
                     "Cannot transition order from " + currentStatus + " to " + targetStatus);
         }
+    }
+
+    private void publishOrderStatusEvent(Order order) {
+
+        EventType eventType = switch (order.getStatus()) {
+            case CONFIRMED -> EventType.ORDER_CONFIRMED;
+            case CANCELLED -> EventType.ORDER_CANCELLED;
+            default -> null;
+        };
+
+        if (eventType == null) {
+            return;
+        }
+
+        eventPublisher.publishOrderEvent(OrderEvent.builder()
+                .eventType(eventType)
+                .orderId(order.getId())
+                .customerId(order.getCustomer().getId())
+                .status(order.getStatus())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     private Order findOrderEntityById(Long id) {

@@ -1,4 +1,4 @@
-package com.simon.application.dto.response;
+package com.simon.application.event;
 
 import com.simon.application.enums.DeliveryStatus;
 import lombok.AllArgsConstructor;
@@ -12,9 +12,11 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DeliveryResponse {
+public class DeliveryEvent {
 
-    private Long id;
+    private EventType eventType;
+
+    private Long deliveryId;
 
     private Long orderId;
 
@@ -22,7 +24,5 @@ public class DeliveryResponse {
 
     private DeliveryStatus status;
 
-    private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
+    private LocalDateTime occurredAt;
 }
