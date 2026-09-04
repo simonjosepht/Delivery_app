@@ -1253,19 +1253,22 @@ The final architecture is intended to evolve toward:
 * [x] Order events (`ORDER_CREATED`, `ORDER_CONFIRMED`, `ORDER_CANCELLED` — published from `OrderServiceImpl` on the matching transitions)
 * [x] Delivery events (`DELIVERY_ASSIGNED`, `DELIVERY_PICKED_UP`, `DELIVERY_OUT_FOR_DELIVERY`, `DELIVERY_COMPLETED` — published from `DeliveryServiceImpl`)
 * [x] Notification events (consumed by `NotificationListener`; a real Notification Service is future work, not built yet)
-* [ ] Event-driven communication — **not yet verified at runtime.** Topics (`order-events`, `delivery-events`, 3 partitions each) are declared via `KafkaTopicConfig` `NewTopic` beans, but this hasn't been confirmed against a live Kafka broker (no Docker daemon in this sandbox).
+* [x] Event-driven communication — verified manually against a live Kafka broker (2026-09-03): both topics (`order-events`, `delivery-events`, 3 partitions each) confirmed created via `kafka-topics.sh --describe`; API calls produced `Notification [...]` log lines in the app; raw messages (key, `__TypeId__` header, JSON body) confirmed via `kafka-console-consumer.sh`; consumer group `notification-service` showed zero lag via `kafka-consumer-groups.sh --describe`.
 
 > `OrderStatus`/`DeliveryStatus` transitions to `ASSIGNED`/`OUT_FOR_DELIVERY`/`DELIVERED` on the **Order** entity intentionally do **not** publish their own events — those transitions are already represented by the corresponding **Delivery**-side events, so publishing both would be a duplicate signal for the same real-world change.
 
 ## Phase 10 — Microservices
 
-* [ ] Extract User/Auth Service
-* [ ] Extract Order Service
-* [ ] Extract Delivery Service
-* [ ] Extract Driver Service
-* [ ] Extract Notification Service
-* [ ] Introduce API Gateway
-* [ ] Inter-service communication
+Design finalized — see [docs/MICROSERVICES.md](docs/MICROSERVICES.md) for the full architecture (5 services, data ownership per service, sync-vs-async contracts, event schemas, project layout, and sequencing).
+
+* [x] Design service boundaries, data ownership, and inter-service contracts
+* [x] Extract User/Auth Service — [user-service/](user-service/) is a standalone Maven project, compiles clean (`mvn -o clean compile`). Publishes `USER_REGISTERED` on every user creation, exposes `GET /internal/users/{id}` for other services. **Not yet runtime-verified** — no Docker daemon reachable in this environment; needs `docker compose up -d` + a manual register/login smoke test on a machine with Docker.
+* [x] Extract Driver Service — [driver-service/](driver-service/) is a standalone Maven project, compiles clean. Owns its own `drivers` table (extension table keyed by `users.id`); consumes `user-events` (creates a driver row on `USER_REGISTERED` + `role==DRIVER`) and `delivery-events` (flips status on `DELIVERY_ASSIGNED`/`DELIVERY_COMPLETED`); exposes `GET /internal/drivers/{id}` for delivery-service; owns the `availableDrivers` Redis cache (moved here from the old monolith's Phase 8 setup). **Not yet runtime-verified** — same reason as user-service; full cross-service verification (confirming a registered driver in user-service actually produces a row here) needs both services' Kafka pointed at the same broker, deferred to Step 7.
+* [x] Extract Order Service — [order-service/](order-service/) is a standalone Maven project, compiles clean. `Order.customer` (`@ManyToOne User`) replaced with a plain `customerId: Long`; validates the customer exists via a synchronous call (`UserServiceClient`, Spring's `RestClient`) to user-service's `GET /internal/users/{id}` at order-creation time — the first real sync cross-service call in the system. Exposes `GET /internal/orders/{id}` for delivery-service. Owns the `orders` Redis cache and still produces `order-events` unchanged from Phase 9. New `UpstreamServiceException` (503) for when user-service is unreachable. **Not yet runtime-verified** — deferred to Step 7 along with the others.
+* [x] Extract Delivery Service — [delivery-service/](delivery-service/) is a standalone Maven project, compiles clean. `Delivery.order`/`Delivery.driver` (`@OneToOne`/`@ManyToOne`) replaced with plain `orderId`/`driverId: Long`. `createDelivery` validates the order exists via `OrderServiceClient` → order-service's `GET /internal/orders/{id}`; `assignDriver` validates the driver exists and is `AVAILABLE` via `DriverServiceClient` → driver-service's `GET /internal/drivers/{id}` — both the same sync-gate pattern as order-service. Notably **simpler** than the monolith version: no longer directly mutates driver status or evicts `availableDrivers` at all — that entire responsibility moved to driver-service's own `delivery-events` consumer (Step 3), so this service just publishes the event and stops. Owns the `deliveries` Redis cache and still produces `delivery-events` unchanged from Phase 9. **Not yet runtime-verified** — deferred to Step 7.
+* [x] Extract Notification Service — [notification-service/](notification-service/) is the smallest of the five: a standalone Maven project with **no database, no external API, and no security/JWT dependency at all** — just `spring-boot-starter` + `spring-kafka`. `NotificationListener` moved as-is, consuming `order-events` and `delivery-events` with its own full-mirror copies of both event contracts (unlike driver-service's trimmed copies, since this service logs every field rather than reacting to just one). No web starter on the classpath, so Spring Boot stays alive purely via the Kafka listener containers' threads — no HTTP port at all. Compiles clean.
+* [x] Introduce API Gateway — [api-gateway/](api-gateway/) routes `/api/v1/auth/**` and `/api/v1/users/**` to user-service (8081), `/api/v1/drivers/**` to driver-service (8082), `/api/v1/orders/**` to order-service (8083), `/api/v1/deliveries/**` to delivery-service (8084), itself on port 8080. Pure reverse proxy — does not validate JWTs; each downstream service still does. Built on Spring Cloud Gateway's **WebFlux** implementation rather than the newer MVC-based one (a real deviation from the original design, driven by this environment's offline Maven cache only having the WebFlux variant available — see `docs/MICROSERVICES.md`). Route config verified against the actual cached jar's configuration metadata rather than assumed. Compiles clean fully offline.
+* [ ] Inter-service communication — **the last remaining item.** The root [docker-compose.yml](docker-compose.yml) is consolidated (4 dedicated Postgres containers on ports 5432–5435, one shared Redis, one shared Kafka) and each service's `application.properties` points at the right port. What's left is purely running it: `docker compose up -d`, start all 5 services + the gateway, then walk the full flow (register a driver → confirm a `drivers` row appears in driver-service's own DB → create/confirm an order → create a delivery → assign that driver → progress it to `DELIVERED` → confirm the driver's status flips back to `AVAILABLE` via the async path → confirm `NotificationListener` logged every event) — no Docker daemon in this environment, so this needs to happen on a machine that has one.
 
 ## Phase 11 — Production Readiness
 
@@ -1296,8 +1299,8 @@ Orders                     █████████████████�
 Deliveries                 ████████████████████ 100%
 Drivers                    ████████████████████ 100%
 Redis Caching              ████████████████████ 100%
-Kafka Events               ████████████████░░░░  80% (implemented, not runtime-verified)
-Microservices              ░░░░░░░░░░░░░░░░░░░░   0%
+Kafka Events               ████████████████████ 100%
+Microservices              ██████████████████░░  90% (all 5 services + gateway extracted, code-complete; runtime verification pending)
 Testing                    ░░░░░░░░░░░░░░░░░░░░   0%
 Deployment                 ░░░░░░░░░░░░░░░░░░░░   0%
 ```
@@ -1364,13 +1367,11 @@ This allows each architectural concept to be understood and tested before introd
 
 # 📌 Immediate Next Step
 
-Phases 1–8 are complete and verified: authentication, authorization, the Order / Delivery / Driver domain, and Redis caching (confirmed against a live Redis instance on 2026-09-03).
+Phases 1–9 are complete and verified: authentication, authorization, the Order / Delivery / Driver domain, Redis caching, and Kafka event-driven communication (all confirmed against live infrastructure on 2026-09-03).
 
-Phase 9 (Kafka events) is implemented in code — `EventPublisher` publishes on the Order/Delivery lifecycle transitions, `NotificationListener` consumes and logs both topics.
+**Phase 10 — Microservices is code-complete.** All 5 services (`user-service`, `driver-service`, `order-service`, `delivery-service`, `notification-service`) plus `api-gateway` are extracted per [docs/MICROSERVICES.md](docs/MICROSERVICES.md), each compiles standalone, and the root [docker-compose.yml](docker-compose.yml) is consolidated (4 dedicated Postgres containers, one shared Redis, one shared Kafka).
 
-**Outstanding before Phase 9 is truly done:** manual runtime verification against a live Kafka broker (start `docker compose up -d`, run the app, hit the order/delivery endpoints, and confirm in the app logs that `NotificationListener` actually received each published event — the same kind of check we just did for Redis in Phase 8).
-
-After that, the next major feature is **Phase 10 — Microservices**.
+**The one thing left:** actually running it. No Docker daemon is reachable in this environment, so the full end-to-end verification — bring up `docker compose up -d`, start all 6 Maven projects, walk register→order→delivery→assignment→completion, confirm the async driver-status-flip and every `NotificationListener` log line — needs to happen on a machine that has Docker. Once that's done, Phase 10 is genuinely finished and Phase 11 (production readiness: testing, logging, monitoring) is next.
 
 ---
 
