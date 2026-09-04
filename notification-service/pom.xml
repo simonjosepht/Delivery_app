@@ -39,6 +39,22 @@
 			<artifactId>spring-kafka</artifactId>
 		</dependency>
 
+		<!-- JSON (de)serialization for JsonDeserializer/JsonSerializer. spring-kafka only
+		     declares jackson-databind as optional, so it is NOT pulled in transitively -
+		     every other service gets it for free via spring-boot-starter-web, but this
+		     service has no web starter, so it must be declared explicitly or the
+		     deserializer fails at runtime (NoClassDefFoundError) the first time a real
+		     Kafka message arrives, despite compiling fine. jackson-datatype-jsr310 is
+		     needed separately for the LocalDateTime fields on OrderEvent/DeliveryEvent. -->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.datatype</groupId>
+			<artifactId>jackson-datatype-jsr310</artifactId>
+		</dependency>
+
 		<!-- Lombok -->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
