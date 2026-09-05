@@ -1,0 +1,586 @@
+{
+  "info": {
+    "_postman_id": "b6f2a1d4-8e3c-4a2f-9b1e-7c5d3f8a2e10",
+    "name": "Delivery App - Microservices",
+    "description": "Covers every endpoint across all 5 services (via the api-gateway on :8080, plus direct internal calls for the 3 service-to-service endpoints, which the gateway never routes).\n\n**Run order**: work through the folders top to bottom, starting with \"1. Setup & Auth\". Login/Register requests have test scripts that automatically save the returned token/id into collection variables (customerToken, driverToken, adminToken, customerId, driverId, orderId, deliveryId) - every other request in this collection already references those variables, so you should not need to copy-paste anything manually.\n\n**Admin bootstrap**: self-registration rejects role=ADMIN by design (see UserServiceImpl). \"Login Admin\" will fail until an admin actually exists. To create the first one: run \"Register Customer\" once with the adminEmail/adminPassword variables (temporarily set role to CUSTOMER), then flip that row's role directly in the database:\n\n    docker exec -it user-service-postgres psql -U postgres -d user_service_db -c \"UPDATE users SET role='ADMIN' WHERE email='admin@test.com';\"\n\nThen \"Login Admin\" will work (a JWT's role claim is fixed at issue time, so you must log in again after the DB update - an old token from before the flip still says CUSTOMER).\n\n**Re-running this collection**: email/phone number are unique constraints. If you re-run the Register requests without changing the *Email/*Phone variables first, you'll get a 409 Conflict - either change those variables or skip straight to the Login requests if the users already exist from a previous run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "description": "api-gateway - use this for every normal request" },
+    { "key": "userServiceUrl", "value": "http://localhost:8081", "description": "direct to user-service - only for the /internal/** request, which the gateway doesn't route" },
+    { "key": "driverServiceUrl", "value": "http://localhost:8082", "description": "direct to driver-service - only for the /internal/** request" },
+    { "key": "orderServiceUrl", "value": "http://localhost:8083", "description": "direct to order-service - only for the /internal/** request" },
+    { "key": "deliveryServiceUrl", "value": "http://localhost:8084", "description": "delivery-service has no /internal/** endpoints of its own" },
+
+    { "key": "customerEmail", "value": "postman.customer@test.com" },
+    { "key": "customerPhone", "value": "5550000001" },
+    { "key": "customerPassword", "value": "pass1234" },
+    { "key": "driverEmail", "value": "postman.driver@test.com" },
+    { "key": "driverPhone", "value": "5550000002" },
+    { "key": "driverPassword", "value": "pass1234" },
+    { "key": "adminEmail", "value": "admin@test.com" },
+    { "key": "adminPhone", "value": "5550000003" },
+    { "key": "adminPassword", "value": "pass1234" },
+
+    { "key": "customerToken", "value": "" },
+    { "key": "driverToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "customerId", "value": "" },
+    { "key": "driverId", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "deliveryId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Setup & Auth",
+      "item": [
+        {
+          "name": "Register Customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('customerId', body.id);",
+                  "    console.log('customerId set to ' + body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Customer\",\n  \"email\": \"{{customerEmail}}\",\n  \"phoneNumber\": \"{{customerPhone}}\",\n  \"password\": \"{{customerPassword}}\",\n  \"role\": \"CUSTOMER\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Register Driver",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('driverId', body.id);",
+                  "    console.log('driverId set to ' + body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Driver\",\n  \"email\": \"{{driverEmail}}\",\n  \"phoneNumber\": \"{{driverPhone}}\",\n  \"password\": \"{{driverPassword}}\",\n  \"role\": \"DRIVER\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Register Admin (bootstrap - run as CUSTOMER first, then flip role in DB)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// See collection description for the DB step needed after this request",
+                  "// before Login Admin will actually return an ADMIN-role token."
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Admin\",\n  \"email\": \"{{adminEmail}}\",\n  \"phoneNumber\": \"{{adminPhone}}\",\n  \"password\": \"{{adminPassword}}\",\n  \"role\": \"CUSTOMER\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users" ] },
+            "description": "Self-registration rejects role=ADMIN, so this registers as CUSTOMER. Run the docker exec/psql UPDATE from the collection description next, then use \"Login Admin\" below to get a real ADMIN-role token."
+          },
+          "response": []
+        },
+        {
+          "name": "Login Customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('customerToken', body.token);",
+                  "    console.log('customerToken saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customerEmail}}\",\n  \"password\": \"{{customerPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "auth", "login" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Driver",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('driverToken', body.token);",
+                  "    console.log('driverToken saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{driverEmail}}\",\n  \"password\": \"{{driverPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "auth", "login" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('adminToken', body.token);",
+                  "    console.log('adminToken saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "auth", "login" ] },
+            "description": "Only works once the DB bootstrap step (see collection description) has flipped this user's role to ADMIN."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Second Admin (requires an existing admin token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Second\",\n  \"lastName\": \"Admin\",\n  \"email\": \"admin2@test.com\",\n  \"phoneNumber\": \"5550000004\",\n  \"password\": \"pass1234\",\n  \"role\": \"ADMIN\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/admin", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users", "admin" ] },
+            "description": "Once you have one real admin (via the bootstrap above), every subsequent admin can be created normally through this endpoint - no more DB surgery needed."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. User Service",
+      "item": [
+        {
+          "name": "Get User By Id",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/{{customerId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users", "{{customerId}}" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Users (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User (self or ADMIN)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"PostmanUpdated\",\n  \"lastName\": \"Customer\",\n  \"phoneNumber\": \"{{customerPhone}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/users/{{customerId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users", "{{customerId}}" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/{{customerId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "users", "{{customerId}}" ] },
+            "description": "Destructive - deletes the customer created earlier. Only run this deliberately."
+          },
+          "response": []
+        },
+        {
+          "name": "[Internal] Get User Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{userServiceUrl}}/internal/users/{{customerId}}", "host": [ "{{userServiceUrl}}" ], "path": [ "internal", "users", "{{customerId}}" ] },
+            "description": "Service-to-service only - not routed through the gateway, hits user-service directly. No auth (see docs/MICROSERVICES.md's accepted gap on internal-endpoint security)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Driver Service",
+      "item": [
+        {
+          "name": "Get All Drivers (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/drivers", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "drivers" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Available Drivers (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/drivers/available", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "drivers", "available" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update My Driver Status - UNAVAILABLE",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"UNAVAILABLE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/drivers/me/status", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "drivers", "me", "status" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update My Driver Status - AVAILABLE",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{driverToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"AVAILABLE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/drivers/me/status", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "drivers", "me", "status" ] },
+            "description": "Will 409 if the driver is currently ON_DELIVERY - that status is system-managed only, see DriverServiceImpl."
+          },
+          "response": []
+        },
+        {
+          "name": "[Internal] Get Driver Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{driverServiceUrl}}/internal/drivers/{{driverId}}", "host": [ "{{driverServiceUrl}}" ], "path": [ "internal", "drivers", "{{driverId}}" ] },
+            "description": "Service-to-service only - hits driver-service directly, port 8082, not via gateway."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Order Service",
+      "item": [
+        {
+          "name": "Create Order (CUSTOMER)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('orderId', body.id);",
+                  "    console.log('orderId set to ' + body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemDescription\": \"Pizza\",\n  \"quantity\": 1,\n  \"totalAmount\": 15.00,\n  \"deliveryAddress\": \"123 Main St\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/orders", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "orders" ] },
+            "description": "Triggers order-service's synchronous call to user-service's /internal/users/{id} to validate the customer exists."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order By Id",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "orders", "{{orderId}}" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Orders (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "orders" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Orders (CUSTOMER)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{customerToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/my", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "orders", "my" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Order Status - CONFIRMED (ADMIN)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/status?status=CONFIRMED",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "v1", "orders", "{{orderId}}", "status" ],
+              "query": [ { "key": "status", "value": "CONFIRMED" } ]
+            },
+            "description": "Run this before \"Create Delivery\" - a delivery can be created against any existing order, but the wider flow expects the order to be confirmed first."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Order (CUSTOMER)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Authorization", "value": "Bearer {{customerToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/cancel", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "orders", "{{orderId}}", "cancel" ] },
+            "description": "Only valid from CREATED status - will 409 if you've already confirmed this order above. Use a fresh order (re-run \"Create Order\") to test cancellation instead."
+          },
+          "response": []
+        },
+        {
+          "name": "[Internal] Get Order Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{orderServiceUrl}}/internal/orders/{{orderId}}", "host": [ "{{orderServiceUrl}}" ], "path": [ "internal", "orders", "{{orderId}}" ] },
+            "description": "Service-to-service only - hits order-service directly, port 8083, not via gateway."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Delivery Service",
+      "item": [
+        {
+          "name": "Create Delivery (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('deliveryId', body.id);",
+                  "    console.log('deliveryId set to ' + body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": {{orderId}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/deliveries", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "deliveries" ] },
+            "description": "Triggers delivery-service's synchronous call to order-service's /internal/orders/{id} to validate the order exists."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Driver (ADMIN)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driverId\": {{driverId}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/v1/deliveries/{{deliveryId}}/assign-driver", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "deliveries", "{{deliveryId}}", "assign-driver" ] },
+            "description": "Triggers delivery-service's synchronous call to driver-service's /internal/drivers/{id} to confirm the driver exists and is AVAILABLE. After this succeeds, check driver-service's own DB shortly after - driverStatus should flip to ON_DELIVERY via the async delivery-events path, not directly from this call."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Delivery By Id",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/deliveries/{{deliveryId}}", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "deliveries", "{{deliveryId}}" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Deliveries (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{adminToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/deliveries", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "deliveries" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Deliveries (DRIVER)",
+          "request": {
+            "method": "GET",
+            "header": [ { "key": "Authorization", "value": "Bearer {{driverToken}}" } ],
+            "url": { "raw": "{{baseUrl}}/api/v1/deliveries/my", "host": [ "{{baseUrl}}" ], "path": [ "api", "v1", "deliveries", "my" ] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Delivery Status - PICKED_UP",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Authorization", "value": "Bearer {{driverToken}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/deliveries/{{deliveryId}}/status?status=PICKED_UP",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "v1", "deliveries", "{{deliveryId}}", "status" ],
+              "query": [ { "key": "status", "value": "PICKED_UP" } ]
+            },
+            "description": "Callable by ADMIN or the assigned DRIVER - this request uses driverToken, swap the Authorization header to adminToken to test the admin path instead."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Delivery Status - OUT_FOR_DELIVERY",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Authorization", "value": "Bearer {{driverToken}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/deliveries/{{deliveryId}}/status?status=OUT_FOR_DELIVERY",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "v1", "deliveries", "{{deliveryId}}", "status" ],
+              "query": [ { "key": "status", "value": "OUT_FOR_DELIVERY" } ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Delivery Status - DELIVERED",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Authorization", "value": "Bearer {{driverToken}}" } ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/deliveries/{{deliveryId}}/status?status=DELIVERED",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "v1", "deliveries", "{{deliveryId}}", "status" ],
+              "query": [ { "key": "status", "value": "DELIVERED" } ]
+            },
+            "description": "After this succeeds, check driver-service's own DB - driverStatus should flip back to AVAILABLE shortly after, via driver-service's own delivery-events consumer."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
